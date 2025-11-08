@@ -1,0 +1,7 @@
+{
+  "name": "Vocal Cortex",
+  "description": "An AI-powered voice interface featuring real-time conversations and dynamic text-to-speech generation, built on the Gemini API.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
