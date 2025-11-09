@@ -2,7 +2,7 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality, FunctionDeclaration, Type } from '@google/genai';
 import { decode, decodeAudioData, createPcmBlob } from '../utils/audio';
 import { findProduct } from '../utils/knowledgeBase';
-import { Bot, Microphone, StopCircle, User, Spinner, AudioWave } from './Icons';
+import { Bot, Microphone, StopCircle, User, Spinner, AudioWave, FileText } from './Icons';
 import { VoiceVisualizer } from './VoiceVisualizer';
 
 type SessionStatus = 'idle' | 'connecting' | 'connected' | 'error';
@@ -13,6 +13,8 @@ interface TranscriptEntry {
 
 const LIVE_INPUT_SAMPLE_RATE = 16000;
 const LIVE_OUTPUT_SAMPLE_RATE = 24000;
+const DEFAULT_SYSTEM_INSTRUCTION = "You are Aura, a friendly and insightful AI companion. Your goal is to have natural, free-flowing conversations. Be curious, engaging, and keep your responses concise to encourage a back-and-forth dialogue. You can use the `productLookup` tool if asked about specific tech products, but your primary role is to be a great conversationalist.";
+
 
 const productLookupFunctionDeclaration: FunctionDeclaration = {
   name: 'productLookup',
@@ -47,6 +49,11 @@ export const LiveChat: React.FC = () => {
   const [status, setStatus] = useState<SessionStatus>('idle');
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [activeSystemInstruction, setActiveSystemInstruction] = useState<string>(DEFAULT_SYSTEM_INSTRUCTION);
+  const [instructionInput, setInstructionInput] = useState<string>(DEFAULT_SYSTEM_INSTRUCTION);
+  const [instructionUpdated, setInstructionUpdated] = useState<boolean>(false);
+  const [summary, setSummary] = useState<string | null>(null);
+  const [isSummarizing, setIsSummarizing] = useState<boolean>(false);
   
   const isModelSpeakingRef = useRef(false);
 
@@ -75,6 +82,9 @@ export const LiveChat: React.FC = () => {
   const stopConversation = useCallback(async () => {
     setStatus('idle');
     isModelSpeakingRef.current = false;
+
+    setInstructionInput(activeSystemInstruction);
+    setInstructionUpdated(false);
 
     if (sessionPromiseRef.current) {
       try {
@@ -117,12 +127,15 @@ export const LiveChat: React.FC = () => {
         outputAudioContextRef.current = null;
     }
     nextStartTimeRef.current = 0;
-  }, []);
+  }, [activeSystemInstruction]);
 
   const startConversation = useCallback(async () => {
     setStatus('connecting');
     setError(null);
     setTranscript([]);
+    setSummary(null);
+    setIsSummarizing(false);
+    setInstructionUpdated(false);
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -153,7 +166,7 @@ export const LiveChat: React.FC = () => {
           tools: [{ functionDeclarations: [productLookupFunctionDeclaration] }],
           inputAudioTranscription: {},
           outputAudioTranscription: {},
-          systemInstruction: "You are Aura, a friendly and insightful AI companion. Your goal is to have natural, free-flowing conversations. Be curious, engaging, and keep your responses concise to encourage a back-and-forth dialogue. You can use the `productLookup` tool if asked about specific tech products, but your primary role is to be a great conversationalist.",
+          systemInstruction: activeSystemInstruction,
         },
         callbacks: {
           onopen: () => {
@@ -202,7 +215,6 @@ export const LiveChat: React.FC = () => {
               
               setTranscript(prev => {
                 let newTranscript = [...prev];
-                // Clean up previous system message if it exists
                 if (newTranscript.length > 0 && newTranscript[newTranscript.length - 1].speaker === 'system') {
                     newTranscript.pop();
                 }
@@ -258,13 +270,39 @@ export const LiveChat: React.FC = () => {
       console.error(err);
       await stopConversation();
     }
-  }, [stopConversation]);
+  }, [stopConversation, activeSystemInstruction]);
 
   useEffect(() => {
     return () => {
       stopConversation();
     };
   }, [stopConversation]);
+
+  const handleSummarize = async () => {
+    if (isSummarizing || transcript.length === 0) return;
+    setIsSummarizing(true);
+    setSummary(null);
+    setError(null);
+
+    const formattedTranscript = transcript
+      .filter(entry => entry.speaker !== 'system')
+      .map(entry => `${entry.speaker.charAt(0).toUpperCase() + entry.speaker.slice(1)}: ${entry.text}`)
+      .join('\n');
+
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-pro',
+        contents: `Provide a concise summary of the key points from the following conversation transcript:\n\n---\n\n${formattedTranscript}`,
+      });
+      setSummary(response.text);
+    } catch (err: any) {
+      console.error(err);
+      setError('Failed to generate summary.');
+    } finally {
+      setIsSummarizing(false);
+    }
+  };
   
   const getStatusText = () => {
     switch(status) {
@@ -322,8 +360,73 @@ export const LiveChat: React.FC = () => {
   return (
     <div className="bg-gray-900 rounded-lg shadow-xl h-full flex flex-col p-4 md:p-6 border border-gray-700">
         <h2 className="text-2xl font-bold mb-4 text-sky-400">Live Conversation with Aura</h2>
+        
+        {(status === 'idle' || status === 'error') && (
+            <div className="mb-4 p-4 bg-gray-800/50 rounded-lg border border-gray-700">
+                <label htmlFor="system-instruction" className="block text-sm font-medium text-gray-300 mb-2">
+                Customize AI Persona (System Instruction)
+                </label>
+                <textarea
+                id="system-instruction"
+                value={instructionInput}
+                onChange={(e) => {
+                    setInstructionInput(e.target.value);
+                    setInstructionUpdated(false);
+                }}
+                rows={3}
+                className="w-full bg-gray-700 border border-gray-600 text-gray-200 p-3 rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-sky-500 transition-colors"
+                placeholder="e.g., You are a witty pirate who tells jokes."
+                />
+                <div className="flex justify-end items-center mt-2 h-8">
+                    {instructionUpdated && <span className="text-sm text-green-400 mr-4 transition-opacity duration-300">Instruction updated!</span>}
+                    <button
+                        onClick={() => {
+                            setActiveSystemInstruction(instructionInput);
+                            setInstructionUpdated(true);
+                        }}
+                        className="px-4 py-2 bg-sky-600 text-white text-sm font-semibold rounded-lg hover:bg-sky-500 transition-colors disabled:opacity-50 disabled:bg-gray-600"
+                        disabled={instructionInput === activeSystemInstruction}
+                    >
+                        Update Instruction
+                    </button>
+                </div>
+            </div>
+        )}
+        
         <div className="flex-grow flex flex-col gap-4 min-h-0">
           {renderTranscript()}
+
+          {status === 'idle' && transcript.length > 0 && (
+            <div className="flex-shrink-0 p-4 border-t border-gray-700/80 mt-2 space-y-4">
+                <h3 className="text-lg font-semibold text-gray-300">Conversation Tools</h3>
+                <div>
+                    <button
+                        onClick={handleSummarize}
+                        disabled={isSummarizing}
+                        className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-gray-700 text-sky-300 font-semibold rounded-lg shadow-md hover:bg-gray-600 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        {isSummarizing ? (
+                            <>
+                                <Spinner className="w-5 h-5" />
+                                <span>Summarizing...</span>
+                            </>
+                        ) : (
+                            <>
+                                <FileText className="w-5 h-5" />
+                                <span>Summarize Conversation</span>
+                            </>
+                        )}
+                    </button>
+                </div>
+                {summary && (
+                    <div className="p-4 bg-gray-800 rounded-lg border border-gray-700 animate-fade-in">
+                        <h4 className="text-md font-bold text-sky-400 mb-2">Conversation Summary</h4>
+                        <p className="text-gray-300 whitespace-pre-wrap text-sm">{summary}</p>
+                    </div>
+                )}
+            </div>
+          )}
+
           <div className="relative flex-shrink-0 flex flex-col items-center justify-center pt-8 pb-4">
             <VoiceVisualizer
                 analyserNode={analyserNodeRef.current}

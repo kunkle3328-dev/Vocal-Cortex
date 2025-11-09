@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { LiveChat } from './components/LiveChat';
 import { TTS } from './components/TTS';
-import { Bot, Text, VocalCortexLogo } from './components/Icons';
+import { AIAnalysis } from './components/DocAnalyzer';
+import { Bot, FileText, Text, VocalCortexLogo } from './components/Icons';
+import DevPanel from './components/DevPanel';
 
-type View = 'live' | 'tts';
+type View = 'live' | 'tts' | 'analysis';
 
 const App: React.FC = () => {
   const [view, setView] = useState<View>('live');
@@ -14,6 +16,19 @@ const App: React.FC = () => {
         ? 'bg-sky-600 text-white shadow-md'
         : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
     }`;
+
+  const renderView = () => {
+    switch (view) {
+      case 'live':
+        return <LiveChat />;
+      case 'tts':
+        return <TTS />;
+      case 'analysis':
+        return <AIAnalysis />;
+      default:
+        return <LiveChat />;
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gray-900 text-white font-sans flex flex-col">
@@ -34,17 +49,22 @@ const App: React.FC = () => {
               <Text className="w-5 h-5" />
               <span className="hidden sm:inline">Text-to-Speech</span>
             </button>
+            <button onClick={() => setView('analysis')} className={navButtonClasses(view === 'analysis')}>
+              <FileText className="w-5 h-5" />
+              <span className="hidden sm:inline">AI Analysis</span>
+            </button>
           </nav>
         </div>
       </header>
 
       <main className="flex-grow container mx-auto p-4 md:p-6">
-        {view === 'live' ? <LiveChat /> : <TTS />}
+        {renderView()}
       </main>
       
       <footer className="bg-gray-800 text-center p-4 text-gray-500 text-sm">
           Powered by Gemini | Vocal Cortex
       </footer>
+      <DevPanel />
     </div>
   );
 };
